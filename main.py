@@ -4,6 +4,7 @@ from xml.parsers.expat import model
 import torch
 
 from models.SimpleNeuralNetworkModel import SimpleNeuralNetworkModel
+from scripts.data_manager import main as data_manager_main
 from scripts.training_loop import training_loop
 
 
@@ -33,6 +34,13 @@ def run_simple_model() -> None:
     training_loop(myModel)
 
 
+def run_data_manager() -> None:
+    print("===========================")
+    print("# Data Manager")
+    print("===========================")
+    data_manager_main()
+
+
 def main():
     while True:
         print("===========================")
@@ -42,8 +50,9 @@ def main():
         print("1. Tensors")
         print("2. GPU Control")
         print("3. Simple Neural Network Model")
+        print("4. Data Manager")
 
-        choice = input("Select an option (0-3): ").strip()
+        choice = input("Select an option (0-4): ").strip()
 
         if choice == "0":
             break
@@ -53,6 +62,8 @@ def main():
             show_gpu_control()
         elif choice == "3":
             run_simple_model()
+        elif choice == "4":
+            run_data_manager()
         else:
             print("Invalid option.")
 
