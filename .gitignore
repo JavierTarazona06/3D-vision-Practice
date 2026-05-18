@@ -1,0 +1,78 @@
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pyre/
+.hypothesis/
+
+# Build and packaging
+build/
+dist/
+site/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# Virtual environments and local Python envs
+.venv/
+venv/
+env/
+ENV/
+pythonenv*/
+
+# Conda
+.conda/
+.conda_env/
+.condarc
+conda-meta/
+
+# Environment files
+.env
+.env.*
+*.local
+
+# Editor settings
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Logs and reports
+*.log
+logs/
+coverage/
+.coverage
+.coverage.*
+htmlcov/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# PyTorch and experiment artifacts
+data/
+datasets/
+runs/
+wandb/
+lightning_logs/
+tb_logs/
+tensorboard/
+checkpoints/
+ckpts/
+artifacts/
+outputs/
+results/
+
+# Model weights and exported artifacts
+*.pt
+*.pth
+*.ckpt
+*.onnx
+*.engine
