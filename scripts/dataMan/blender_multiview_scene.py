@@ -30,8 +30,6 @@ Notes:
     This script must be executed with Blender's Python interpreter, not with
     your normal system Python. That is why the command starts with `blender`.
 """
-# TODO 
-# Check blender detects GPU
 from __future__ import annotations # Delays evaluation of type hints
 
 import argparse # Read flags
@@ -110,7 +108,11 @@ def parse_args() -> argparse.Namespace:
         type=str,
         default="AUTO",
         choices=["AUTO", "CPU", "GPU"],
-        help="Cycles device. AUTO keeps Blender's current default.",
+        help=(
+            "Cycles device. AUTO keeps Blender's current default. "
+            "GPU enables the first detected non-CPU Cycles backend for "
+            "the current background session."
+        ),
     )
     parser.add_argument(
         "--no-denoise",
@@ -149,6 +151,86 @@ def validate_blender_runtime() -> None:
         f"Available view transforms: {sorted(view_transform_items) or ['<none>']}. "
         "Fix Blender's colormanagement files or launch Blender with a valid "
         "`OCIO=/path/to/config.ocio` environment variable before running this script."
+    )
+
+
+def query_cycles_devices(backend: str) -> list[tuple[str, str, str, bool]]:
+    """
+    Return the devices reported by Cycles for a compute backend.
+
+    Unknown backends on older Blender builds simply return an empty list.
+    """
+    import _cycles
+
+    try:
+        return list(_cycles.available_devices(backend))
+    except ValueError:
+        return []
+
+
+def configure_cycles_compute_device(requested_device: str) -> None:
+    """
+    Configure Cycles to use CPU or an auto-detected GPU backend.
+
+    When `requested_device` is `GPU`, this enables the first supported
+    non-CPU Cycles backend reported by Blender for the current session.
+    """
+    scene = bpy.context.scene
+
+    if requested_device == "AUTO":
+        print("[INFO] Cycles device: AUTO (keeping Blender default settings)")
+        return
+
+    if requested_device == "CPU":
+        scene.cycles.device = "CPU"
+        print("[INFO] Cycles device: CPU")
+        return
+
+    cycles_addon = bpy.context.preferences.addons.get("cycles")
+    if cycles_addon is None:
+        raise RuntimeError("Cycles addon is not available, so GPU rendering cannot be configured.")
+
+    prefs = cycles_addon.preferences
+    backend_order = ("CUDA", "OPTIX", "HIP", "ONEAPI", "METAL", "OPENCL")
+    probed_backends: list[str] = []
+
+    for backend in backend_order:
+        devices = query_cycles_devices(backend)
+        gpu_devices = [device for device in devices if device[1] != "CPU"]
+        if not devices:
+            continue
+
+        device_names = ", ".join(name for name, *_ in devices)
+        probed_backends.append(f"{backend}: {device_names}")
+        if not gpu_devices:
+            continue
+
+        try:
+            prefs.compute_device_type = backend
+        except (TypeError, ValueError):
+            continue
+
+        prefs.get_devices()
+        enabled_gpu_names: list[str] = []
+        for device in prefs.devices:
+            use_device = getattr(device, "type", "") != "CPU"
+            device.use = use_device
+            if use_device:
+                enabled_gpu_names.append(device.name)
+
+        if not enabled_gpu_names:
+            continue
+
+        scene.cycles.device = "GPU"
+        print(f"[INFO] Cycles GPU backend: {backend}")
+        print(f"[INFO] Cycles enabled GPU devices: {', '.join(enabled_gpu_names)}")
+        return
+
+    details = "; ".join(probed_backends) if probed_backends else "<none>"
+    raise RuntimeError(
+        "No supported Cycles GPU backend was detected for `--device GPU`. "
+        f"Cycles backend probe: {details}. Use `--device CPU` or check your "
+        "Blender GPU drivers/runtime."
     )
 
 
@@ -526,8 +608,7 @@ def configure_render_settings(
         scene.cycles.use_denoising = use_denoising
         if hasattr(scene.cycles, "use_adaptive_sampling"):
             scene.cycles.use_adaptive_sampling = True
-        if device != "AUTO":
-            scene.cycles.device = device
+        configure_cycles_compute_device(device)
 
     scene.render.resolution_x = resolution
     scene.render.resolution_y = resolution

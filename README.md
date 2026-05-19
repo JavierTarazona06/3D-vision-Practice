@@ -129,6 +129,36 @@ Notes:
 - `--samples 16` is a good starting point for quick tests
 - `--device CPU` is the safe default; switch to `GPU` only after Blender
   correctly detects a supported Cycles GPU backend on your machine
+- when using `--device GPU` with the `CYCLES` engine, the script now enables
+  the first detected non-CPU Cycles backend for the current background session;
+  on NVIDIA setups like CUDA, this means the detected NVIDIA GPU is enabled
+
+### Check Blender GPU detection
+
+From the project root, you can inspect which Cycles backends and devices
+`./blender-local` detects with:
+
+```bash
+./blender-local --background --python-expr 'import _cycles
+for backend in ["CPU", "CUDA", "OPTIX", "HIP", "ONEAPI", "METAL"]:
+    try:
+        print(backend, _cycles.available_devices(backend))
+    except Exception as e:
+        print(backend, "ERROR", repr(e))'
+```
+
+If the `CUDA` line includes your NVIDIA GPU, you can render with:
+
+```bash
+./blender-local --background --factory-startup \
+  --python scripts/dataMan/blender_multiview_scene.py -- \
+  --background-image ./assets/blender/img/forest.png \
+  --output-dir ./dataset/MultiViewScene/ \
+  --seed 42 \
+  --resolution 512 \
+  --samples 16 \
+  --device GPU
+```
 
 ### Optional shell shortcut
 
@@ -146,4 +176,3 @@ If the environment already exists and you want to sync it with `environment.yml`
 ```bash
 conda env update -f environment.yml --prune
 ```
-
