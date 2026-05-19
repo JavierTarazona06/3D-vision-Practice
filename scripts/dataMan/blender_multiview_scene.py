@@ -128,8 +128,17 @@ def validate_blender_runtime() -> None:
 
     A broken color-management startup on this machine produces almost-black
     renders even for bright scenes, so rendering would waste time and disk.
+    Blender 2.93 background sessions can also report incomplete enum metadata
+    while still exposing valid active color-management settings, so this check
+    trusts the active values when they are usable.
     """
     scene = bpy.context.scene
+    current_display_device = scene.display_settings.display_device
+    current_view_transform = scene.view_settings.view_transform
+    display_device_items = {
+        item.identifier
+        for item in scene.display_settings.bl_rna.properties["display_device"].enum_items
+    }
     view_transform_items = {
         item.identifier
         for item in scene.view_settings.bl_rna.properties["view_transform"].enum_items
@@ -139,8 +148,24 @@ def validate_blender_runtime() -> None:
     ocio_env = os.environ.get("OCIO")
     ocio_path = Path(ocio_env).expanduser() if ocio_env else datafiles_dir / "colormanagement" / "config.ocio"
 
+    has_usable_display_devices = any(item != "NONE" for item in display_device_items)
     has_usable_view_transforms = any(item != "NONE" for item in view_transform_items)
-    if has_usable_view_transforms and ocio_path.exists():
+    has_usable_active_settings = (
+        current_display_device not in {"", "NONE"}
+        and current_view_transform not in {"", "NONE"}
+    )
+
+    if ocio_path.exists() and (
+        (has_usable_display_devices and has_usable_view_transforms)
+        or has_usable_active_settings
+    ):
+        if not (has_usable_display_devices and has_usable_view_transforms):
+            print(
+                "[WARN] Blender reported reduced color-management enum metadata "
+                f"in background mode; continuing with active settings "
+                f"display_device={current_display_device!r}, "
+                f"view_transform={current_view_transform!r}."
+            )
         return
 
     checked_path = ocio_path if ocio_env else datafiles_dir / "colormanagement" / "config.ocio"
@@ -148,6 +173,9 @@ def validate_blender_runtime() -> None:
         "Blender started without a usable OpenColorIO configuration, which will "
         "produce near-black renders. "
         f"Checked OCIO path: {checked_path}. "
+        f"Active display device: {current_display_device!r}. "
+        f"Active view transform: {current_view_transform!r}. "
+        f"Available display devices: {sorted(display_device_items) or ['<none>']}. "
         f"Available view transforms: {sorted(view_transform_items) or ['<none>']}. "
         "Fix Blender's colormanagement files or launch Blender with a valid "
         "`OCIO=/path/to/config.ocio` environment variable before running this script."
