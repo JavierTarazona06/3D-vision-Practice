@@ -29,21 +29,60 @@ die() {
     exit 1
 }
 
+capture_checked_output() {
+    local output
+
+    if ! output="$("$@" 2>&1)"; then
+        printf '%s\n' "$output" >&2
+        return 1
+    fi
+
+    [[ -n "$output" ]] || return 1
+    printf '%s\n' "$output"
+}
+
+require_output_contains() {
+    local description="$1"
+    local expected_fragment="$2"
+    shift 2
+
+    local output
+    log "$description"
+    output="$(capture_checked_output "$@")" || die "Command failed or produced empty output: $*"
+    printf '%s\n' "$output"
+
+    [[ "$output" == *"$expected_fragment"* ]] || die "Unexpected output from $*: expected to find '$expected_fragment'."
+}
+
 usage() {
     cat <<EOF
-Usage: $(basename "$0") [--blender-path PATH]
+Usage: $(basename "$0") [OPTIONS]
 
-Install this project on a Linux machine:
-  - install Miniconda if conda is missing
-  - create or update the ${ENV_NAME} environment from environment.yml
-  - install a project-local Blender build
-  - register PROJECT_ROOT and BLENDER_BIN in the conda environment
-  - verify the Blender binary and create the blender-local symlink
+Prepare this project on a Linux machine by:
+  - installing Miniconda if conda is missing
+  - creating or updating the ${ENV_NAME} environment from environment.yml
+  - using a project-local Blender build, a user-provided Blender path, or a
+    downloaded fallback Blender archive
+  - registering PROJECT_ROOT and BLENDER_BIN in the conda environment
+  - verifying PyTorch imports/runtime details and Blender command output
+  - creating the project-local blender-local symlink
+
+Examples:
+  $(basename "$0")
+  $(basename "$0") --blender-path /path/to/blender-2.93.18-linux-x64.tar.xz
+  $(basename "$0") --blender-path /path/to/blender-2.93.18-linux-x64
+
+Notes:
+  - The preferred local Blender archive is ${PREFERRED_BLENDER_ARCHIVE}.
+  - If the preferred archive is missing, the script uses --blender-path when
+    provided; otherwise it downloads ${FALLBACK_BLENDER_ARCHIVE}.
+  - PyTorch verification accepts CPU-only machines and reports CUDA details
+    only when torch detects a usable CUDA device.
 
 Options:
   --blender-path PATH   Path to a Blender archive (.tar.xz) or an extracted
-                        Blender directory to use when the preferred local
-                        Blender archive is not present in the project root.
+                        Blender directory to use if the preferred local
+                        Blender archive or extracted directory is unavailable.
   -h, --help            Show this help message and exit.
 EOF
 }
@@ -216,6 +255,7 @@ create_or_update_environment() {
 
     log "Activating conda environment $ENV_NAME."
     conda activate "$ENV_NAME"
+    [[ "${CONDA_DEFAULT_ENV:-}" == "$ENV_NAME" ]] || die "Conda environment $ENV_NAME is not active after conda activate."
 }
 
 archive_root_dir_name() {
@@ -312,11 +352,60 @@ select_blender_installation() {
 }
 
 verify_pytorch() {
-    log "Checking that PyTorch, torchvision, and torchaudio import correctly."
-    python -c "import torch, torchvision, torchaudio; print('torch OK'); print('torchvision OK'); print('torchaudio OK')"
+    local output
 
-    log "Checking PyTorch version and CUDA availability."
-    python -c "import torch; print(torch.__version__); print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU only')"
+    log "Verifying that PyTorch, torchvision, and torchaudio import correctly."
+    if ! output="$(
+        python - <<'PY' 2>&1
+import importlib
+
+for package_name in ("torch", "torchvision", "torchaudio"):
+    module = importlib.import_module(package_name)
+    version = getattr(module, "__version__", "")
+    if not version:
+        raise SystemExit(f"{package_name} imported but has an empty __version__")
+    print(f"{package_name}=OK version={version}")
+PY
+    )"; then
+        printf '%s\n' "$output" >&2
+        die "PyTorch package import verification failed."
+    fi
+    printf '%s\n' "$output"
+
+    [[ "$output" == *"torch=OK version="* ]] || die "torch import check did not report a valid version."
+    [[ "$output" == *"torchvision=OK version="* ]] || die "torchvision import check did not report a valid version."
+    [[ "$output" == *"torchaudio=OK version="* ]] || die "torchaudio import check did not report a valid version."
+
+    log "Verifying PyTorch runtime details."
+    if ! output="$(
+        python - <<'PY' 2>&1
+import torch
+
+version = getattr(torch, "__version__", "")
+if not version:
+    raise SystemExit("torch.__version__ is empty")
+
+cuda_available = torch.cuda.is_available()
+device_name = "CPU only"
+
+if cuda_available:
+    device_name = torch.cuda.get_device_name(0).strip()
+    if not device_name:
+        raise SystemExit("CUDA is available but torch.cuda.get_device_name(0) returned an empty string")
+
+print(f"torch_version={version}")
+print(f"cuda_available={'yes' if cuda_available else 'no'}")
+print(f"compute_target={device_name}")
+PY
+    )"; then
+        printf '%s\n' "$output" >&2
+        die "PyTorch runtime verification failed."
+    fi
+    printf '%s\n' "$output"
+
+    [[ "$output" == *"torch_version="* ]] || die "PyTorch runtime check did not report a torch version."
+    [[ "$output" == *"cuda_available="* ]] || die "PyTorch runtime check did not report CUDA availability."
+    [[ "$output" == *"compute_target="* ]] || die "PyTorch runtime check did not report the compute target."
 }
 
 configure_blender_binaries() {
@@ -349,11 +438,11 @@ register_conda_environment_vars() {
 }
 
 verify_blender() {
-    log "Checking Blender version from BLENDER_BIN."
-    "$BLENDER_BIN" --version
+    require_output_contains "Checking Blender version from BLENDER_BIN." "Blender " \
+        "$BLENDER_BIN" --version
 
-    log "Checking Blender in background mode."
-    "$BLENDER_BIN" --background --factory-startup --version
+    require_output_contains "Checking Blender in background mode." "Blender " \
+        "$BLENDER_BIN" --background --factory-startup --version
 }
 
 create_blender_symlink() {
@@ -361,9 +450,13 @@ create_blender_symlink() {
 
     ln -sf "$BLENDER_BIN_PATH" "$symlink_path"
     log "Created symlink $symlink_path -> $BLENDER_BIN_PATH."
+    [[ -L "$symlink_path" ]] || die "Failed to create the blender-local symlink at $symlink_path."
+    [[ "$(readlink -f "$symlink_path")" == "$BLENDER_BIN_PATH" ]] || die "blender-local does not resolve to $BLENDER_BIN_PATH."
 
-    "$symlink_path" --version
-    "$symlink_path" --background --factory-startup --version
+    require_output_contains "Checking Blender version through blender-local." "Blender " \
+        "$symlink_path" --version
+    require_output_contains "Checking background Blender through blender-local." "Blender " \
+        "$symlink_path" --background --factory-startup --version
 }
 
 main() {
