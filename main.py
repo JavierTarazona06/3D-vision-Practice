@@ -4,7 +4,7 @@ from xml.parsers.expat import model
 import torch
 
 from models.SimpleNeuralNetworkModel import SimpleNeuralNetworkModel
-from scripts.data_manager import main as data_manager_main
+from scripts.dataMan.data_manager import main as data_manager_main
 from scripts.training_loop import training_loop
 
 

@@ -24,6 +24,7 @@ class MyDataset(Dataset):
     def __str__(self) -> str:
         return super().__str__() + f"\nData: {self.data}\nLabels: {self.labels}"
 
+
 def main():
     dataset = MyDataset(
         data=[torch.randn(10) for _ in range(100)],
@@ -35,6 +36,7 @@ def main():
     shuffle = True
     loader = DataLoader(dataset, batch_size=8, shuffle=shuffle)
     print(f"DataLoader: Created with {len(loader)} batches and shuffle enabled? {shuffle}\n", loader)
+
 
 if __name__ == "__main__":
     main()
