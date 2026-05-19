@@ -1,4 +1,4 @@
-name: codeprep
+name: 3D-vision-practice
 channels:
   - defaults
 dependencies:
@@ -162,4 +162,4 @@ dependencies:
       - torchvision==0.27.0+cu126
       - triton==3.7.0
       - typing-extensions==4.15.0
-prefix: /home/javit/miniconda3/envs/codeprep
+prefix: /home/javit/miniconda3/envs/3D-vision-practice
