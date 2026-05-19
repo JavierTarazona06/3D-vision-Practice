@@ -195,7 +195,20 @@ create_or_update_environment() {
 archive_root_dir_name() {
     local archive_path="$1"
 
-    tar -tf "$archive_path" | sed 's#^\./##' | awk -F/ 'NF { print $1; exit }'
+    tar -tf "$archive_path" | awk -F/ '
+        {
+            gsub(/^\.\//, "", $0)
+        }
+        NF && first == "" {
+            first = $1
+            print first
+        }
+        END {
+            if (first == "") {
+                exit 1
+            }
+        }
+    '
 }
 
 extract_blender_archive() {
@@ -255,11 +268,22 @@ select_blender_installation() {
     if [[ ! -f "$fallback_archive_path" ]]; then
         log "Downloading fallback Blender archive to $fallback_archive_path."
         download_file "$FALLBACK_BLENDER_URL" "$fallback_archive_path"
+        log "Extracting the downloaded fallback Blender archive."
+        extract_blender_archive "$fallback_archive_path"
+        return 0
     else
         log "Using existing fallback Blender archive $fallback_archive_path."
     fi
 
     extract_blender_archive "$fallback_archive_path"
+}
+
+verify_pytorch() {
+    log "Checking that PyTorch, torchvision, and torchaudio import correctly."
+    python -c "import torch, torchvision, torchaudio; print('torch OK'); print('torchvision OK'); print('torchaudio OK')"
+
+    log "Checking PyTorch version and CUDA availability."
+    python -c "import torch; print(torch.__version__); print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU only')"
 }
 
 configure_blender_binaries() {
@@ -319,6 +343,7 @@ main() {
     create_or_update_environment
     select_blender_installation
     configure_blender_binaries
+    verify_pytorch
     register_conda_environment_vars
     verify_blender
     create_blender_symlink
