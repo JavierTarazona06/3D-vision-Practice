@@ -1,6 +1,31 @@
 # 3D Vision Practice
 
-## Installation
+## Project Installation
+
+The first setup steps can be done by running:
+
+```bash
+bash ./scripts/set_up.sh
+```
+
+This script performs the following tasks:
+
+- installs Miniconda if `conda` is missing
+- creates or updates the `${ENV_NAME}` environment from [environment.yml](environment.yml)
+- uses a project-local Blender build, a user-provided Blender path, or a downloaded fallback Blender archive
+- registers `PROJECT_ROOT` and `BLENDER_BIN` in the conda environment
+- verifies PyTorch imports/runtime details and Blender command output
+- creates the project-local `blender-local` symlink
+
+## Run the project
+
+After activating the environment, start the project with:
+
+```bash
+python main.py
+```
+
+## Detailed Installation
 
 This project provides a `conda` environment definition in [environment.yml](environment.yml).
 
@@ -77,26 +102,6 @@ chmod +x blender-2.93.18-linux-x64/blender
 chmod +x blender-2.93.18-linux-x64/blender-softwaregl
 ```
 
-### Relate Blender to this project
-
-After activating the `conda` environment, expose the project-local Blender in
-the current shell:
-
-```bash
-conda env config vars set \ PROJECT_ROOT=/home/javit/ENSTA/2A/StageRecherche/3D-vision-Practice \ BLENDER_BIN=/home/javit/ENSTA/2A/StageRecherche/3D-vision-Practice/blender-2.93.18-linux-x64/blender
-```
-
-Check that the project uses the expected Blender binary:
-
-```bash
-"$BLENDER_BIN" --version
-```
-
-If you always work from the project root, you can also use the binary directly:
-
-```bash
-./blender-2.93.18-linux-x64/blender --version
-```
 
 ## Use Blender In This Environment
 
@@ -142,10 +147,3 @@ If the environment already exists and you want to sync it with `environment.yml`
 conda env update -f environment.yml --prune
 ```
 
-## Run the project
-
-After activating the environment, start the project with:
-
-```bash
-python main.py
-```

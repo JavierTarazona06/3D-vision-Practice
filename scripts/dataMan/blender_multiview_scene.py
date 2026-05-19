@@ -12,19 +12,25 @@ Scene contents:
 - Ten PNG renders saved to an output directory.
 
 Usage example:
-    blender --background --python scripts/dataMan/blender_multiview_scene.py -- \
+    ./blender-local --background --python scripts/dataMan/blender_multiview_scene.py -- \
         --background-image ./assets/blender/img/forest.png \
         --output-dir ./dataset/MultiViewScene/ \
-        --seed 42
+        --seed 42 --resolution 512 --samples 16 \
+        --device GPU
 
-    Add --factory-startup at position 2 to avoid loading user preferences and addons, which can cause errors on some machines.
-
+    To avoid loading user preferences and addons, which can 
+        cause errors on some machines use :
+    ./blender-local --background --factory-startup --python scripts/dataMan/blender_multiview_scene.py -- \
+        --background-image ./assets/blender/img/forest.png \
+        --output-dir ./dataset/MultiViewScene/ \
+        --seed 42 --resolution 512 --samples 16 \
+        --device GPU
+        
 Notes:
     This script must be executed with Blender's Python interpreter, not with
     your normal system Python. That is why the command starts with `blender`.
 """
 # TODO 
-# Right Blender Download, at project
 # Check blender detects GPU
 from __future__ import annotations # Delays evaluation of type hints
 
