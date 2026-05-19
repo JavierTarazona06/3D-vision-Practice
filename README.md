@@ -58,7 +58,8 @@ Extract Blender in the project root so the tree looks like this:
 
 ### Download and extract
 
-Download `blender-2.93.18-linux-x64` from the official Blender releases, then
+Download `blender-2.93.18-linux-x64` from the official Blender releases (or get the one of
+the repo, or the version you need), then
 extract it in the project root.
 
 If the archive is already downloaded, from the project root run:
@@ -82,9 +83,7 @@ After activating the `conda` environment, expose the project-local Blender in
 the current shell:
 
 ```bash
-conda activate 3D-vision-practice
-export PROJECT_ROOT="$(pwd)"
-export BLENDER_BIN="$PROJECT_ROOT/blender-2.93.18-linux-x64/blender"
+conda env config vars set \ PROJECT_ROOT=/home/javit/ENSTA/2A/StageRecherche/3D-vision-Practice \ BLENDER_BIN=/home/javit/ENSTA/2A/StageRecherche/3D-vision-Practice/blender-2.93.18-linux-x64/blender
 ```
 
 Check that the project uses the expected Blender binary:
