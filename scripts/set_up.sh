@@ -4,7 +4,7 @@ set -euo pipefail
 ENV_NAME="3D-vision-practice"
 PREFERRED_BLENDER_ARCHIVE="blender-2.93.18-linux-x64.tar.xz"
 PREFERRED_BLENDER_DIR="blender-2.93.18-linux-x64"
-FALLBACK_BLENDER_URL="https://www.blender.org/download/release/Blender5.1/blender-5.1.1-linux-x64.tar.xz/"
+FALLBACK_BLENDER_URL="https://download.blender.org/release/Blender5.1/blender-5.1.1-linux-x64.tar.xz"
 FALLBACK_BLENDER_ARCHIVE="$(basename "${FALLBACK_BLENDER_URL%/}")"
 DEFAULT_MINICONDA_DIR="$HOME/miniconda3"
 
@@ -93,16 +93,42 @@ download_file() {
     local output_path="$2"
 
     if command -v curl >/dev/null 2>&1; then
-        curl -fL "$url" -o "$output_path"
-        return 0
+        if curl --fail --location --retry 5 --retry-delay 2 --retry-all-errors --continue-at - "$url" -o "$output_path"; then
+            return 0
+        fi
+
+        warn "curl failed while downloading $url. Trying wget instead."
     fi
 
     if command -v wget >/dev/null 2>&1; then
-        wget -O "$output_path" "$url"
-        return 0
+        if wget --tries=5 --waitretry=2 -O "$output_path" "$url"; then
+            return 0
+        fi
     fi
 
-    die "Neither curl nor wget is installed; cannot download $url."
+    die "Failed to download $url. Re-running the setup may resume any partial download left on disk."
+}
+
+is_valid_tar_archive() {
+    local archive_path="$1"
+
+    [[ -f "$archive_path" ]] || return 1
+    tar -tf "$archive_path" >/dev/null 2>&1
+}
+
+download_blender_archive() {
+    local url="$1"
+    local output_path="$2"
+    local partial_path
+
+    partial_path="${output_path}.partial"
+    download_file "$url" "$partial_path"
+
+    if ! is_valid_tar_archive "$partial_path"; then
+        die "Downloaded file from $url is not a valid tar archive. The remote endpoint may have returned an HTML page instead of Blender."
+    fi
+
+    mv -f "$partial_path" "$output_path"
 }
 
 source_conda_shell() {
@@ -215,6 +241,7 @@ extract_blender_archive() {
     local archive_path="$1"
     local root_dir_name
 
+    is_valid_tar_archive "$archive_path" || die "Blender archive is invalid or corrupted: $archive_path"
     root_dir_name="$(archive_root_dir_name "$archive_path")"
     [[ -n "$root_dir_name" ]] || die "Could not determine archive root directory for $archive_path."
 
@@ -241,6 +268,7 @@ select_blender_installation() {
     fi
 
     if [[ -f "$preferred_archive_path" ]]; then
+        is_valid_tar_archive "$preferred_archive_path" || die "Preferred Blender archive is invalid or corrupted: $preferred_archive_path"
         log "Found preferred Blender archive $preferred_archive_path."
         extract_blender_archive "$preferred_archive_path"
         return 0
@@ -256,6 +284,7 @@ select_blender_installation() {
         fi
 
         if [[ -f "$custom_path" ]]; then
+            is_valid_tar_archive "$custom_path" || die "Custom Blender archive is invalid or corrupted: $custom_path"
             warn "Preferred Blender archive was not found. Using the user-provided Blender archive: $custom_path"
             extract_blender_archive "$custom_path"
             return 0
@@ -265,9 +294,13 @@ select_blender_installation() {
     warn "Preferred Blender archive $PREFERRED_BLENDER_ARCHIVE was not found and no custom Blender path was supplied."
     warn "Downloading Blender 5.1.1 as a fallback. Incompatibilities may arise."
 
-    if [[ ! -f "$fallback_archive_path" ]]; then
+    if [[ -f "$fallback_archive_path" ]] && ! is_valid_tar_archive "$fallback_archive_path"; then
+        warn "Existing fallback Blender archive is invalid. Downloading a fresh copy from Blender's direct file host."
+    fi
+
+    if [[ ! -f "$fallback_archive_path" ]] || ! is_valid_tar_archive "$fallback_archive_path"; then
         log "Downloading fallback Blender archive to $fallback_archive_path."
-        download_file "$FALLBACK_BLENDER_URL" "$fallback_archive_path"
+        download_blender_archive "$FALLBACK_BLENDER_URL" "$fallback_archive_path"
         log "Extracting the downloaded fallback Blender archive."
         extract_blender_archive "$fallback_archive_path"
         return 0
