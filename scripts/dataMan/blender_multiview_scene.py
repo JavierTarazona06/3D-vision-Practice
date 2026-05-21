@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-Generate a simple Blender scene and render 10 random camera views.
+Generate a simple Blender scene and render a random number of camera views.
+Default is 10 views, but you can specify more or fewer with the `--num-views` flag.
 
 Scene contents:
 - A designed cube on the left side of the X axis.
@@ -29,6 +30,8 @@ Usage example:
 Notes:
     This script must be executed with Blender's Python interpreter, not with
     your normal system Python. That is why the command starts with `blender`.
+
+    Blender has 4 main modes ops,context, data and type.
 """
 from __future__ import annotations # Delays evaluation of type hints
 
@@ -101,7 +104,7 @@ def parse_args() -> argparse.Namespace:
         "--samples",
         type=int,
         default=64,
-        help="Number of Cycles samples per render.",
+        help="Number of Cycles samples per render. Low : 4-8 samples, medium : 16-64 samples, high : 128+ samples.",
     )
     parser.add_argument(
         "--device",
@@ -116,7 +119,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--no-denoise",
-        action="store_true",
+        action="store_true", # Noise could be present at low sample counts, but it speeds up rendering significantly.
         help="Disable Cycles denoising for faster renders.",
     )
     return parser.parse_args(argv)
@@ -133,10 +136,11 @@ def validate_blender_runtime() -> None:
     trusts the active values when they are usable.
     """
     scene = bpy.context.scene
-    current_display_device = scene.display_settings.display_device
-    current_view_transform = scene.view_settings.view_transform
+    current_display_device = scene.display_settings.display_device # How colors are displayed, sRGB
+    current_view_transform = scene.view_settings.view_transform # How colors are transformed for display
     display_device_items = {
         item.identifier
+        # What values are legal for each property
         for item in scene.display_settings.bl_rna.properties["display_device"].enum_items
     }
     view_transform_items = {
@@ -144,10 +148,12 @@ def validate_blender_runtime() -> None:
         for item in scene.view_settings.bl_rna.properties["view_transform"].enum_items
     }
 
+    # Search for the config.ocio file at the default Blender datafiles location or in the OCIO environment variable path.
     datafiles_dir = Path(bpy.utils.system_resource("DATAFILES"))
     ocio_env = os.environ.get("OCIO")
     ocio_path = Path(ocio_env).expanduser() if ocio_env else datafiles_dir / "colormanagement" / "config.ocio"
 
+    # Check if settings for device and transform are available and not broken.
     has_usable_display_devices = any(item != "NONE" for item in display_device_items)
     has_usable_view_transforms = any(item != "NONE" for item in view_transform_items)
     has_usable_active_settings = (
@@ -155,6 +161,8 @@ def validate_blender_runtime() -> None:
         and current_view_transform not in {"", "NONE"}
     )
 
+    # Checks if the config file exists and is usable in background mode.
+         # If exists, but not usable, warn.
     if ocio_path.exists() and (
         (has_usable_display_devices and has_usable_view_transforms)
         or has_usable_active_settings
@@ -184,7 +192,8 @@ def validate_blender_runtime() -> None:
 
 def query_cycles_devices(backend: str) -> list[tuple[str, str, str, bool]]:
     """
-    Return the devices reported by Cycles for a compute backend.
+    Return the devices (GPU, CPU, ...) reported by Cycles for a compute backend.
+    Ex. ("NVIDIA GeForce RTX 3070", "CUDA", "GPU", True)
 
     Unknown backends on older Blender builds simply return an empty list.
     """
@@ -202,42 +211,56 @@ def configure_cycles_compute_device(requested_device: str) -> None:
 
     When `requested_device` is `GPU`, this enables the first supported
     non-CPU Cycles backend reported by Blender for the current session.
+
+    args:
+        - requested_device: "AUTO", "CPU" or "GPU"
     """
     scene = bpy.context.scene
 
+    # AUTO device, do nothing
     if requested_device == "AUTO":
         print("[INFO] Cycles device: AUTO (keeping Blender default settings)")
         return
 
+    # CPU device, force it and leave
     if requested_device == "CPU":
         scene.cycles.device = "CPU"
         print("[INFO] Cycles device: CPU")
         return
 
+    # GPU device, probe for supported backends and enable the first one with available GPU devices.
+
+    # Check existance of Cycles Add-on
     cycles_addon = bpy.context.preferences.addons.get("cycles")
     if cycles_addon is None:
         raise RuntimeError("Cycles addon is not available, so GPU rendering cannot be configured.")
 
+    # Cycles has the GPu required configuration
     prefs = cycles_addon.preferences
     backend_order = ("CUDA", "OPTIX", "HIP", "ONEAPI", "METAL", "OPENCL")
     probed_backends: list[str] = []
 
+    # Test each backend in order
     for backend in backend_order:
+        # For this backend, no devices? Change to next backend. Otherwise we filter not CPU devices
         devices = query_cycles_devices(backend)
         gpu_devices = [device for device in devices if device[1] != "CPU"]
         if not devices:
             continue
 
+        # Store non CPU devices and test next backend if there are not GPU devices
         device_names = ", ".join(name for name, *_ in devices)
         probed_backends.append(f"{backend}: {device_names}")
         if not gpu_devices:
             continue
 
+        # Assign this backend to cycles preferences to be used
         try:
             prefs.compute_device_type = backend
         except (TypeError, ValueError):
             continue
 
+        # For the selected backend, enable all non-CPU devices and store their names for logging.
         prefs.get_devices()
         enabled_gpu_names: list[str] = []
         for device in prefs.devices:
@@ -246,14 +269,18 @@ def configure_cycles_compute_device(requested_device: str) -> None:
             if use_device:
                 enabled_gpu_names.append(device.name)
 
+        # We don't have enabled GPUs devices ? Test next Backend
         if not enabled_gpu_names:
             continue
 
+        # We have found at least one GPU device enabled for this backend,
+            # we can set it (or them) for cycles and return
         scene.cycles.device = "GPU"
         print(f"[INFO] Cycles GPU backend: {backend}")
         print(f"[INFO] Cycles enabled GPU devices: {', '.join(enabled_gpu_names)}")
         return
 
+    # In this part, no backend has non-CPUs devices to be enabled, so print ERROR
     details = "; ".join(probed_backends) if probed_backends else "<none>"
     raise RuntimeError(
         "No supported Cycles GPU backend was detected for `--device GPU`. "
@@ -269,8 +296,11 @@ def clear_scene() -> None:
     Returns:
         None
     """
+    # Remove all objects
     bpy.ops.object.select_all(action="SELECT")
     bpy.ops.object.delete()
+
+    # Remove all materials, cameras and lights from data
 
     for material in list(bpy.data.materials):
         bpy.data.materials.remove(material)
@@ -281,6 +311,10 @@ def clear_scene() -> None:
     for light in list(bpy.data.lights):
         bpy.data.lights.remove(light)
 
+    # We want raw 3D scene so we remove compositor postprocessing nodes
+        # for render and sequencer for video editing, and disable use of nodes in the scene.
+    # Nodes are used as a chain processing approach, so we clear all existing nodes if any, to 
+        # avoid unexpected effects on the rendered images.
     scene = bpy.context.scene
     scene.render.use_compositing = False
     scene.render.use_sequencer = False
@@ -296,6 +330,10 @@ def create_principled_material(
     """
     Create a simple Principled BSDF material.
 
+    BSDF : Bidirectional Scattering Distribution Function
+    Principled means Blender gives you one practical shader that bundles the 
+        most common material controls into one node
+
     Args:
         name: Material name.
         base_color: RGBA color with values in [0, 1].
@@ -306,12 +344,15 @@ def create_principled_material(
         bpy.types.Material: Created Blender material.
     """
     material = bpy.data.materials.new(name)
+    # Enabled to use the materials shader node tree
     material.use_nodes = True
 
+    # Get Principled BSDF node from the tree or our material
     bsdf = material.node_tree.nodes.get("Principled BSDF")
     if bsdf is None:
         raise RuntimeError("Principled BSDF node was not found.")
 
+    # Set color, roughness and metallic properties to the BSDF node of our material
     bsdf.inputs["Base Color"].default_value = base_color
     bsdf.inputs["Roughness"].default_value = roughness
     bsdf.inputs["Metallic"].default_value = metallic
@@ -320,7 +361,8 @@ def create_principled_material(
 
 def create_checker_cube_material() -> bpy.types.Material:
     """
-    Create a procedural checker material for the cube design.
+    Creates a material for the cube with a procedural checkerboard 
+        pattern instead of one flat color.
 
     Returns:
         bpy.types.Material: Material with checker texture connected to base color.
@@ -335,12 +377,15 @@ def create_checker_cube_material() -> bpy.types.Material:
     if bsdf is None:
         raise RuntimeError("Principled BSDF node was not found.")
 
+    # Create a node with the checker pattern at material tree
+        # with name, colors (blue and yellow) and scale (size of the checkers grid) customized.
     checker = nodes.new(type="ShaderNodeTexChecker")
     checker.name = "Procedural_Checker_Design"
     checker.inputs["Scale"].default_value = 8.0
     checker.inputs["Color1"].default_value = (0.05, 0.10, 0.22, 1.0)
     checker.inputs["Color2"].default_value = (1.0, 0.82, 0.20, 1.0)
 
+    # The base color of the BSDF comes from the checker node color
     links.new(checker.outputs["Color"], bsdf.inputs["Base Color"])
     bsdf.inputs["Roughness"].default_value = 0.35
     return material
@@ -363,15 +408,27 @@ def create_gradient_pyramid_material() -> bpy.types.Material:
     if bsdf is None:
         raise RuntimeError("Principled BSDF node was not found.")
 
+    # Create nodes for giving a coordinate system to the object, 
+        # separating the axis components and having color in RGB channels rather than one number for color gradient
     tex_coord = nodes.new(type="ShaderNodeTexCoord")
     separate_xyz = nodes.new(type="ShaderNodeSeparateXYZ")
     color_ramp = nodes.new(type="ShaderNodeValToRGB")
 
+    # Set the position of the first stop of the ramp at 15%
+        # andset color of the first stop to a dark blue
     color_ramp.color_ramp.elements[0].position = 0.15
     color_ramp.color_ramp.elements[0].color = (0.18, 0.28, 0.38, 1.0)  # dark blue-gray
+    # Set the position of the second stop of the ramp at 100%
+        # andset color of the second stop to a light blue
     color_ramp.color_ramp.elements[1].position = 1.0
     color_ramp.color_ramp.elements[1].color = (0.50, 0.68, 0.86, 1.0)  # light blue
 
+    # The object coordinate become, 
+        # separate coordinates of the object
+        # take the Z axis and map height to colors (the factor for color map)
+            # so the mapping will be the height of the pyramid, and we will have a 
+            # vertical gradient where bottom is 0
+        # send that color to the material
     links.new(tex_coord.outputs["Generated"], separate_xyz.inputs["Vector"])
     links.new(separate_xyz.outputs["Z"], color_ramp.inputs["Fac"])
     links.new(color_ramp.outputs["Color"], bsdf.inputs["Base Color"])
@@ -401,38 +458,43 @@ def create_scene_objects() -> list[bpy.types.Object]:
         roughness=0.9,
     )
 
-    # Cube on the left side of X axis.
+    # Add Cube on the left side of X axis.
     bpy.ops.mesh.primitive_cube_add(size=1.7, location=(-2.2, 0.0, 0.85))
     cube = bpy.context.object
     cube.name = "Designed_Cube_Left_X"
     cube.data.materials.append(cube_material)
-    if hasattr(cube.data, "use_auto_smooth"):
-        cube.data.use_auto_smooth = True
-        cube.data.auto_smooth_angle = math.radians(60.0)
+    if hasattr(cube.data, "use_auto_smooth"): # If property exists
+        cube.data.use_auto_smooth = True # Smooth angles that it consider
+        cube.data.auto_smooth_angle = math.radians(60.0) # Edges less sharper than 60 degrees will be smoothed
     for polygon in cube.data.polygons:
-        polygon.use_smooth = True
+        polygon.use_smooth = True # Shade faces smoothly
 
+    # Bevel makes the edges more rounded and visually more realistic.
+    # It has a width and segments that control the geometry of the bevel.
+    # Weighted normals are used to control the surface normals for better shading taking into account where the
+        # Object surface is pointing
     bevel = cube.modifiers.new(name="Small_Bevel_For_Design", type="BEVEL")
     bevel.width = 0.05
     bevel.segments = 2
     cube.modifiers.new(name="Weighted_Normals", type="WEIGHTED_NORMAL")
 
     # Sphere on the right side of X axis.
+        # u and v for latitude and longitude segments, radius for size and location for position in the scene
     bpy.ops.mesh.primitive_uv_sphere_add(
-        segments=64,
-        ring_count=32,
+        segments=64, # Vertical slices, longitude
+        ring_count=32, # Horizontal slices, latitude
         radius=0.95,
         location=(2.2, 0.0, 0.95),
     )
     sphere = bpy.context.object
     sphere.name = "Sphere_Right_X"
     sphere.data.materials.append(sphere_material)
-    bpy.ops.object.shade_smooth()
+    bpy.ops.object.shade_smooth() # Smooth, not faceted
 
     # Pyramid on one side of Y axis.
     # Blender cone with vertices=4 behaves as a square pyramid.
     bpy.ops.mesh.primitive_cone_add(
-        vertices=4,
+        vertices=4, # Circular base to cone base
         radius1=1.0,
         radius2=0.0,
         depth=2.0,
@@ -448,7 +510,9 @@ def create_scene_objects() -> list[bpy.types.Object]:
     ground = bpy.context.object
     ground.name = "Ground_Plane"
     ground.data.materials.append(ground_material)
-    bpy.ops.object.shade_smooth()
+    #bpy.ops.object.shade_smooth() # Blender context dependent
+    for polygon in ground.data.polygons:
+        polygon.use_smooth = True  # Not really needed for a plane, but we do it for consistency with the other objects
 
     return [cube, sphere, pyramid]
 
@@ -469,6 +533,8 @@ def set_world_background(background_image_path: Path) -> None:
     if not background_image_path.exists():
         raise FileNotFoundError(f"Background image not found: {background_image_path}")
 
+    # Create a new world or take the existing one and activate nodes, 
+        # which allow us to set the background as an image texture.
     world = bpy.context.scene.world or bpy.data.worlds.new("World")
     bpy.context.scene.world = world
     world.use_nodes = True
@@ -477,6 +543,7 @@ def set_world_background(background_image_path: Path) -> None:
     links = world.node_tree.links
     nodes.clear()
 
+    # Nodes for final world and texture/color/light
     output = nodes.new(type="ShaderNodeOutputWorld")
     background = nodes.new(type="ShaderNodeBackground")
 
@@ -484,6 +551,8 @@ def set_world_background(background_image_path: Path) -> None:
     image_node.name = "Forest_Background_Image"
     image_node.image = bpy.data.images.load(str(background_image_path.resolve()))
 
+    # Connect image, background and world output to render the background image in the scene
+        # and set the brightness of background to a value
     links.new(image_node.outputs["Color"], background.inputs["Color"])
     links.new(background.outputs["Background"], output.inputs["Surface"])
     background.inputs["Strength"].default_value = 0.8
@@ -496,12 +565,22 @@ def add_lights() -> None:
     Returns:
         None
     """
+    # Light types are Point like bulb, area like a panel,
+        # sun for a directional lighh and spot like a flaslight (cone of light)
+    # Enrgy is the intensity that depends on the type of light
+        # sun does not require as much as area light to have a good illumination.
+    # Size controls the softness of shadows for area lights, and the angle of the sun for sun lights.
+        # More siae, softer shadows.
+
+    # Add a large area light above and in front of the objects, pointing downwards.
     bpy.ops.object.light_add(type="AREA", location=(0.0, -3.5, 6.0))
     area_light = bpy.context.object
     area_light.name = "Large_Soft_Area_Light"
     area_light.data.energy = 650.0
     area_light.data.size = 5.0
 
+    # Add a sun with a moderate intensity and a wide angle for soft shadows.
+    # Rotation makes rays come from the upper front right
     bpy.ops.object.light_add(type="SUN", location=(0.0, 0.0, 5.0))
     sun = bpy.context.object
     sun.name = "Soft_Sun_Light"
@@ -520,7 +599,11 @@ def look_at(obj: bpy.types.Object, target: Vector) -> None:
     Returns:
         None
     """
-    direction = target - obj.location
+    direction = target - obj.location # Vector from camera to target
+    # Make object to look at target by rotation the quaternion direction
+        # where the viewing direction of the object is -z
+        # and the up direction that must be kept as much as possible is y
+        # Then change to traditional euler angles for the object rotation in each dimension
     obj.rotation_euler = direction.to_track_quat("-Z", "Y").to_euler()
 
 
@@ -528,6 +611,11 @@ def compute_target_point(objects: Iterable[bpy.types.Object]) -> Vector:
     """
     Compute a robust camera target from the main scene objects.
     """
+
+    # Define world bounds based on The added objects with mesh, the figures.
+        # First, add at the list all the corners of objects transformed to 
+        # world coorfinates thanks to the matrix_world of each object, which contains the position, 
+        # rotation and scale of the object in the world.
     bounds_world: list[Vector] = []
     for obj in objects:
         if obj.type != "MESH":
@@ -537,6 +625,7 @@ def compute_target_point(objects: Iterable[bpy.types.Object]) -> Vector:
     if not bounds_world:
         return Vector((0.0, 0.0, 1.0))
 
+    # Get smallest and largest coordinates points by dimension
     min_corner = Vector((
         min(point.x for point in bounds_world),
         min(point.y for point in bounds_world),
@@ -547,6 +636,8 @@ def compute_target_point(objects: Iterable[bpy.types.Object]) -> Vector:
         max(point.y for point in bounds_world),
         max(point.z for point in bounds_world),
     ))
+
+    # Get the midpoint of the bounding box defined by the smallest and largest coordinates,
     return (min_corner + max_corner) * 0.5
 
 
@@ -561,10 +652,15 @@ def sample_camera_position(radius_min: float, radius_max: float) -> Vector:
     Returns:
         Vector: Random 3D camera position.
     """
-    radius = random.uniform(radius_min, radius_max)
+    # Define spherical coordinates to place camera 
+        # azimuth is theta the angle in the horizontal plane that should point to target,
+        # elevation is phi the angle from the horizontal plane.
+        # radius is rho the distance from the target, 
     azimuth = random.uniform(0.0, 2.0 * math.pi)
     elevation = random.uniform(math.radians(18.0), math.radians(55.0))
+    radius = random.uniform(radius_min, radius_max)
 
+    # Transform spherical coordinates to Cartesian coordinates for camera position.
     x = radius * math.cos(elevation) * math.cos(azimuth)
     y = radius * math.cos(elevation) * math.sin(azimuth)
     z = radius * math.sin(elevation)
@@ -587,17 +683,25 @@ def add_random_cameras(num_views: int, seed: int, target: Vector) -> list[bpy.ty
     cameras: list[bpy.types.Object] = []
 
     for view_idx in range(num_views):
+        # Create camera at random position with radios distance to the target
         position = sample_camera_position(radius_min=5.2, radius_max=7.0)
         bpy.ops.object.camera_add(location=position)
         camera = bpy.context.object
-        camera.name = f"Random_View_Camera_{view_idx:03d}"
-        camera.data.lens = 45.0
+        camera.name = f"Random_View_Camera_{view_idx:03d}" # Padding with 3 digits -> Number is ###
+
+        camera.data.lens = 45.0 # Focal length in mm, more is zoom, less is wide angle
         camera.data.sensor_width = 32.0
-        camera.data.clip_start = 0.1
-        camera.data.clip_end = 100.0
+        camera.data.clip_start = 0.1 # Objects closer tham this disappear
+        camera.data.clip_end = 100.0 # Objects farther than this disappear
+
+        # We activate depth of field to focus on target
+            # which menas sharper edges at focus and blurry edges far from focus
+            # We set that focus distance and the aperture where focus stop, 
+            # higher value, less blur, but also less realistic and more rendering
         camera.data.dof.use_dof = True
         camera.data.dof.focus_distance = (camera.location - target).length
         camera.data.dof.aperture_fstop = 7.5
+
         look_at(camera, target)
         cameras.append(camera)
 
@@ -626,7 +730,7 @@ def configure_render_settings(
     Returns:
         None
     """
-    output_dir.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True) # Create it with parents if it does not exist
 
     scene = bpy.context.scene
     scene.render.engine = engine
@@ -634,12 +738,15 @@ def configure_render_settings(
     if engine == "CYCLES":
         scene.cycles.samples = samples
         scene.cycles.use_denoising = use_denoising
+        # Enables that number of cycles samples required for a pixel depend on the
+            # complexity of the pixel
         if hasattr(scene.cycles, "use_adaptive_sampling"):
             scene.cycles.use_adaptive_sampling = True
         configure_cycles_compute_device(device)
 
     scene.render.resolution_x = resolution
     scene.render.resolution_y = resolution
+    # Enable background, not transparent background
     scene.render.film_transparent = False
     scene.render.image_settings.file_format = "PNG"
     scene.render.image_settings.color_mode = "RGBA"
@@ -661,7 +768,9 @@ def render_views(cameras: Iterable[bpy.types.Object], output_dir: Path) -> None:
     for view_idx, camera in enumerate(cameras):
         scene.camera = camera
         scene.render.filepath = str((output_dir / f"view_{view_idx:03d}.png").resolve())
+        # Update scene
         bpy.context.view_layer.update()
+        # write_still makes render to save the image to the filepath defined in scene.render.filepath
         bpy.ops.render.render(write_still=True)
         print(f"[OK] Rendered: {scene.render.filepath}")
 
