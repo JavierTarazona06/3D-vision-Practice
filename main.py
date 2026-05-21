@@ -118,7 +118,7 @@ def run_blender_multiview_scene() -> None:
         "--background-image",
         "./assets/blender/img/forest.png",
         "--output-dir",
-        "./dataset/MultiViewScene/",
+        "./dataset/MultiViewScene/", # TODO leave that as a global variable at the begining of file
         "--seed",
         "42",
         "--resolution",
@@ -154,7 +154,7 @@ def run_blender_multiview_scene() -> None:
         "--input-dir",
         "./dataset/MultiViewScene/",
         "--output-path",
-        "./dataset/MultiViewScene/contact_sheet_views.png",
+        "./dataset/MultiViewScene/contact_sheet_views.png", # TODO leave that as a global variable at the begining of file
         "--max-images",
         str(preview_count),
     ]
