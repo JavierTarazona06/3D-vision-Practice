@@ -10,6 +10,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 BLENDER_LOCAL = PROJECT_ROOT / "blender-local"
 MULTIVIEW_BACKGROUND = PROJECT_ROOT / "assets" / "blender" / "img" / "forest.png"
 MULTIVIEW_OUTPUT_DIR = PROJECT_ROOT / "dataset" / "MultiViewScene"
+MULTIVIEW_IMAGE_DIR = MULTIVIEW_OUTPUT_DIR / "img"
+MULTIVIEW_METADATA_DIR = MULTIVIEW_OUTPUT_DIR / "metadata"
 MULTIVIEW_CONTACT_SHEET = MULTIVIEW_OUTPUT_DIR / "contact_sheet_views.png"
 
 
@@ -91,7 +93,7 @@ def blender_command_failed(completed: subprocess.CompletedProcess[str]) -> bool:
 def collect_fresh_views(started_at_ns: int) -> list[Path]:
     return sorted(
         path
-        for path in MULTIVIEW_OUTPUT_DIR.glob("view_*.png")
+        for path in MULTIVIEW_IMAGE_DIR.glob("view_*.png")
         if path.stat().st_mtime_ns >= started_at_ns
     )
 
@@ -116,15 +118,17 @@ def run_blender_multiview_scene() -> None:
         "scripts/dataMan/blender_multiview_scene.py",
         "--",
         "--background-image",
-        "./assets/blender/img/forest.png",
+        str(MULTIVIEW_BACKGROUND),
         "--output-dir",
-        "./dataset/MultiViewScene/", # TODO leave that as a global variable at the begining of file
+        str(MULTIVIEW_OUTPUT_DIR),
         "--seed",
         "42",
         "--resolution",
         "512",
         "--samples",
         "16",
+        "--metadata-format",
+        "json",
         "--device",
         "GPU",
     ]
@@ -152,9 +156,9 @@ def run_blender_multiview_scene() -> None:
         "scripts/dataMan/blender_contact_sheet.py",
         "--",
         "--input-dir",
-        "./dataset/MultiViewScene/",
+        str(MULTIVIEW_IMAGE_DIR),
         "--output-path",
-        "./dataset/MultiViewScene/contact_sheet_views.png", # TODO leave that as a global variable at the begining of file
+        str(MULTIVIEW_CONTACT_SHEET),
         "--max-images",
         str(preview_count),
     ]
@@ -163,7 +167,8 @@ def run_blender_multiview_scene() -> None:
         print("Contact sheet generation failed.")
         return
 
-    print(f"Rendered {len(generated_views)} views to {MULTIVIEW_OUTPUT_DIR}")
+    print(f"Rendered {len(generated_views)} views to {MULTIVIEW_IMAGE_DIR}")
+    print(f"Saved matching metadata to {MULTIVIEW_METADATA_DIR}")
     print(f"Saved n-view preview grid to {MULTIVIEW_CONTACT_SHEET}")
 
 

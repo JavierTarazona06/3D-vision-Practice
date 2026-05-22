@@ -36,14 +36,291 @@ Notes:
 from __future__ import annotations # Delays evaluation of type hints
 
 import argparse # Read flags
+import csv
+import json
 import math
 import os
 import random
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable
 
 import bpy
 from mathutils import Vector
+
+
+CSV_COLUMNS = [
+    "view_serial",
+    "image_filename",
+    "record_type",
+    "name",
+    "object_type",
+    "primitive_type",
+    "location_x",
+    "location_y",
+    "location_z",
+    "rotation_x",
+    "rotation_y",
+    "rotation_z",
+    "scale_x",
+    "scale_y",
+    "scale_z",
+    "lens",
+    "sensor_width",
+    "clip_start",
+    "clip_end",
+    "dof_enabled",
+    "focus_distance",
+    "aperture_fstop",
+    "material_name",
+    "roughness",
+    "metallic",
+    "base_color_r",
+    "base_color_g",
+    "base_color_b",
+    "base_color_a",
+    "size",
+    "segments",
+    "ring_count",
+    "radius",
+    "vertices",
+    "radius1",
+    "radius2",
+    "depth",
+    "auto_smooth",
+    "auto_smooth_angle",
+    "bevel_width",
+    "bevel_segments",
+    "checker_scale",
+    "checker_color1_r",
+    "checker_color1_g",
+    "checker_color1_b",
+    "checker_color1_a",
+    "checker_color2_r",
+    "checker_color2_g",
+    "checker_color2_b",
+    "checker_color2_a",
+    "gradient_stop0_position",
+    "gradient_stop0_r",
+    "gradient_stop0_g",
+    "gradient_stop0_b",
+    "gradient_stop0_a",
+    "gradient_stop1_position",
+    "gradient_stop1_r",
+    "gradient_stop1_g",
+    "gradient_stop1_b",
+    "gradient_stop1_a",
+]
+
+
+def format_view_serial(view_idx: int) -> str:
+    return f"view_{view_idx:03d}"
+
+
+def vector_to_list(values: Iterable[float]) -> list[float]:
+    return [float(value) for value in values]
+
+
+def color_to_list(values: Iterable[float]) -> list[float]:
+    return [float(value) for value in values]
+
+
+def build_object_metadata(
+    obj: bpy.types.Object,
+    primitive_type: str,
+    material_name: str,
+    extra_fields: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    metadata: dict[str, Any] = {
+        "name": obj.name,
+        "object_type": obj.type,
+        "primitive_type": primitive_type,
+        "location": vector_to_list(obj.location),
+        "rotation_euler": vector_to_list(obj.rotation_euler),
+        "scale": vector_to_list(obj.scale),
+        "material_name": material_name,
+    }
+    if extra_fields:
+        metadata.update(extra_fields)
+    return metadata
+
+
+def prepare_output_directories(output_dir: Path) -> tuple[Path, Path]:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    image_dir = output_dir / "img"
+    metadata_dir = output_dir / "metadata"
+    image_dir.mkdir(parents=True, exist_ok=True)
+    metadata_dir.mkdir(parents=True, exist_ok=True)
+    return image_dir, metadata_dir
+
+
+def build_camera_metadata(
+    camera: bpy.types.Object,
+    view_idx: int,
+    image_path: Path,
+    resolution: int,
+) -> dict[str, Any]:
+    return {
+        "view_serial": format_view_serial(view_idx),
+        "image_filename": image_path.name,
+        "image_path": str(image_path.resolve()),
+        "resolution": [int(resolution), int(resolution)],
+        "name": camera.name,
+        "object_type": camera.type,
+        "location": vector_to_list(camera.location),
+        "rotation_euler": vector_to_list(camera.rotation_euler),
+        "scale": vector_to_list(camera.scale),
+        "lens": float(camera.data.lens),
+        "sensor_width": float(camera.data.sensor_width),
+        "clip_start": float(camera.data.clip_start),
+        "clip_end": float(camera.data.clip_end),
+        "dof_enabled": bool(camera.data.dof.use_dof),
+        "focus_distance": float(camera.data.dof.focus_distance),
+        "aperture_fstop": float(camera.data.dof.aperture_fstop),
+    }
+
+
+def set_xyz_columns(row: dict[str, Any], prefix: str, values: Iterable[float]) -> None:
+    x, y, z = [float(value) for value in values]
+    row[f"{prefix}_x"] = x
+    row[f"{prefix}_y"] = y
+    row[f"{prefix}_z"] = z
+
+
+def set_rgba_columns(row: dict[str, Any], prefix: str, values: Iterable[float]) -> None:
+    red, green, blue, alpha = [float(value) for value in values]
+    row[f"{prefix}_r"] = red
+    row[f"{prefix}_g"] = green
+    row[f"{prefix}_b"] = blue
+    row[f"{prefix}_a"] = alpha
+
+
+def metadata_to_csv_row(
+    metadata: dict[str, Any],
+    *,
+    record_type: str,
+    view_serial: str,
+    image_filename: str,
+) -> dict[str, Any]:
+    row = {column: "" for column in CSV_COLUMNS}
+    row["view_serial"] = view_serial
+    row["image_filename"] = image_filename
+    row["record_type"] = record_type
+    row["name"] = metadata.get("name", "")
+    row["object_type"] = metadata.get("object_type", "")
+    row["primitive_type"] = metadata.get("primitive_type", "")
+
+    if "location" in metadata:
+        set_xyz_columns(row, "location", metadata["location"])
+    if "rotation_euler" in metadata:
+        set_xyz_columns(row, "rotation", metadata["rotation_euler"])
+    if "scale" in metadata:
+        set_xyz_columns(row, "scale", metadata["scale"])
+    if "base_color" in metadata:
+        set_rgba_columns(row, "base_color", metadata["base_color"])
+    if "checker_color1" in metadata:
+        set_rgba_columns(row, "checker_color1", metadata["checker_color1"])
+    if "checker_color2" in metadata:
+        set_rgba_columns(row, "checker_color2", metadata["checker_color2"])
+    if "gradient_stop0_color" in metadata:
+        set_rgba_columns(row, "gradient_stop0", metadata["gradient_stop0_color"])
+    if "gradient_stop1_color" in metadata:
+        set_rgba_columns(row, "gradient_stop1", metadata["gradient_stop1_color"])
+
+    scalar_fields = (
+        "lens",
+        "sensor_width",
+        "clip_start",
+        "clip_end",
+        "dof_enabled",
+        "focus_distance",
+        "aperture_fstop",
+        "material_name",
+        "roughness",
+        "metallic",
+        "size",
+        "segments",
+        "ring_count",
+        "radius",
+        "vertices",
+        "radius1",
+        "radius2",
+        "depth",
+        "auto_smooth",
+        "auto_smooth_angle",
+        "bevel_width",
+        "bevel_segments",
+        "checker_scale",
+        "gradient_stop0_position",
+        "gradient_stop1_position",
+    )
+    for field in scalar_fields:
+        value = metadata.get(field)
+        if value is not None:
+            row[field] = value
+
+    return row
+
+
+def export_view_metadata(
+    metadata_format: str,
+    metadata_dir: Path,
+    camera: bpy.types.Object,
+    view_idx: int,
+    image_path: Path,
+    resolution: int,
+    object_metadata_by_name: dict[str, dict[str, Any]],
+) -> None:
+    camera_metadata = build_camera_metadata(
+        camera=camera,
+        view_idx=view_idx,
+        image_path=image_path,
+        resolution=resolution,
+    )
+    view_serial = camera_metadata["view_serial"]
+    metadata_path = metadata_dir / f"{view_serial}.{metadata_format}"
+
+    if metadata_format == "json":
+        camera_payload = {
+            key: value
+            for key, value in camera_metadata.items()
+            if key not in {"view_serial", "image_filename", "image_path", "resolution"}
+        }
+        payload = {
+            "view_serial": view_serial,
+            "image": {
+                "filename": camera_metadata["image_filename"],
+                "path": camera_metadata["image_path"],
+                "resolution": camera_metadata["resolution"],
+            },
+            "camera": camera_payload,
+            "objects": list(object_metadata_by_name.values()),
+        }
+        with metadata_path.open("w", encoding="utf-8") as metadata_file:
+            json.dump(payload, metadata_file, indent=2)
+            metadata_file.write("\n")
+    else:
+        with metadata_path.open("w", newline="", encoding="utf-8") as metadata_file:
+            writer = csv.DictWriter(metadata_file, fieldnames=CSV_COLUMNS)
+            writer.writeheader()
+            writer.writerow(
+                metadata_to_csv_row(
+                    camera_metadata,
+                    record_type="camera",
+                    view_serial=view_serial,
+                    image_filename=camera_metadata["image_filename"],
+                )
+            )
+            for object_metadata in object_metadata_by_name.values():
+                writer.writerow(
+                    metadata_to_csv_row(
+                        object_metadata,
+                        record_type="object",
+                        view_serial=view_serial,
+                        image_filename=camera_metadata["image_filename"],
+                    )
+                )
+
+    print(f"[OK] Metadata exported: {metadata_path.resolve()}")
 
 
 def parse_args() -> argparse.Namespace:
@@ -121,6 +398,13 @@ def parse_args() -> argparse.Namespace:
         "--no-denoise",
         action="store_true", # Noise could be present at low sample counts, but it speeds up rendering significantly.
         help="Disable Cycles denoising for faster renders.",
+    )
+    parser.add_argument(
+        "--metadata-format",
+        type=str,
+        default="json",
+        choices=["json", "csv"],
+        help="Per-view metadata export format stored in output-dir/metadata.",
     )
     return parser.parse_args(argv)
 
@@ -437,25 +721,48 @@ def create_gradient_pyramid_material() -> bpy.types.Material:
     return material
 
 
-def create_scene_objects() -> list[bpy.types.Object]:
+def create_scene_objects() -> tuple[list[bpy.types.Object], dict[str, dict[str, Any]]]:
     """
     Create the cube, sphere, pyramid and ground plane.
 
     Returns:
-        list[bpy.types.Object]: Main scene objects used for camera framing.
+        tuple[list[bpy.types.Object], dict[str, dict[str, Any]]]:
+        Main scene objects used for camera framing and exportable object metadata.
     """
+    object_metadata_by_name: dict[str, dict[str, Any]] = {}
+
+    cube_checker_scale = 8.0
+    cube_checker_color1 = (0.05, 0.10, 0.22, 1.0)
+    cube_checker_color2 = (1.0, 0.82, 0.20, 1.0)
+    cube_roughness = 0.35
+    cube_metallic = 0.0
     cube_material = create_checker_cube_material()
+
+    sphere_base_color = (0.85, 0.15, 0.10, 1.0)
+    sphere_roughness = 0.42
+    sphere_metallic = 0.0
     sphere_material = create_principled_material(
         name="Sphere_Smooth_Red_Material",
-        base_color=(0.85, 0.15, 0.10, 1.0),
-        roughness=0.42,
-        metallic=0.0,
+        base_color=sphere_base_color,
+        roughness=sphere_roughness,
+        metallic=sphere_metallic,
     )
+
+    gradient_stop0_position = 0.15
+    gradient_stop0_color = (0.18, 0.28, 0.38, 1.0)
+    gradient_stop1_position = 1.0
+    gradient_stop1_color = (0.50, 0.68, 0.86, 1.0)
+    pyramid_roughness = 0.45
+    pyramid_metallic = 0.0
     pyramid_material = create_gradient_pyramid_material()
+
+    ground_base_color = (0.12, 0.20, 0.12, 1.0)
+    ground_roughness = 0.9
+    ground_metallic = 0.0
     ground_material = create_principled_material(
         name="Ground_Matte_Dark_Green",
-        base_color=(0.12, 0.20, 0.12, 1.0),
-        roughness=0.9,
+        base_color=ground_base_color,
+        roughness=ground_roughness,
     )
 
     # Add Cube on the left side of X axis.
@@ -477,6 +784,23 @@ def create_scene_objects() -> list[bpy.types.Object]:
     bevel.width = 0.05
     bevel.segments = 2
     cube.modifiers.new(name="Weighted_Normals", type="WEIGHTED_NORMAL")
+    object_metadata_by_name[cube.name] = build_object_metadata(
+        obj=cube,
+        primitive_type="cube",
+        material_name=cube_material.name,
+        extra_fields={
+            "size": 1.7,
+            "roughness": cube_roughness,
+            "metallic": cube_metallic,
+            "auto_smooth": bool(getattr(cube.data, "use_auto_smooth", False)),
+            "auto_smooth_angle": float(getattr(cube.data, "auto_smooth_angle", 0.0)),
+            "bevel_width": float(bevel.width),
+            "bevel_segments": int(bevel.segments),
+            "checker_scale": cube_checker_scale,
+            "checker_color1": color_to_list(cube_checker_color1),
+            "checker_color2": color_to_list(cube_checker_color2),
+        },
+    )
 
     # Sphere on the right side of X axis.
         # u and v for latitude and longitude segments, radius for size and location for position in the scene
@@ -490,6 +814,19 @@ def create_scene_objects() -> list[bpy.types.Object]:
     sphere.name = "Sphere_Right_X"
     sphere.data.materials.append(sphere_material)
     bpy.ops.object.shade_smooth() # Smooth, not faceted
+    object_metadata_by_name[sphere.name] = build_object_metadata(
+        obj=sphere,
+        primitive_type="uv_sphere",
+        material_name=sphere_material.name,
+        extra_fields={
+            "segments": 64,
+            "ring_count": 32,
+            "radius": 0.95,
+            "base_color": color_to_list(sphere_base_color),
+            "roughness": sphere_roughness,
+            "metallic": sphere_metallic,
+        },
+    )
 
     # Pyramid on one side of Y axis.
     # Blender cone with vertices=4 behaves as a square pyramid.
@@ -504,6 +841,23 @@ def create_scene_objects() -> list[bpy.types.Object]:
     pyramid = bpy.context.object
     pyramid.name = "Blue_Gray_Gradient_Pyramid_Positive_Y"
     pyramid.data.materials.append(pyramid_material)
+    object_metadata_by_name[pyramid.name] = build_object_metadata(
+        obj=pyramid,
+        primitive_type="cone_pyramid",
+        material_name=pyramid_material.name,
+        extra_fields={
+            "vertices": 4,
+            "radius1": 1.0,
+            "radius2": 0.0,
+            "depth": 2.0,
+            "roughness": pyramid_roughness,
+            "metallic": pyramid_metallic,
+            "gradient_stop0_position": gradient_stop0_position,
+            "gradient_stop0_color": color_to_list(gradient_stop0_color),
+            "gradient_stop1_position": gradient_stop1_position,
+            "gradient_stop1_color": color_to_list(gradient_stop1_color),
+        },
+    )
 
     # Ground plane.
     bpy.ops.mesh.primitive_plane_add(size=9.0, location=(0.0, 0.0, 0.0))
@@ -513,8 +867,19 @@ def create_scene_objects() -> list[bpy.types.Object]:
     #bpy.ops.object.shade_smooth() # Blender context dependent
     for polygon in ground.data.polygons:
         polygon.use_smooth = True  # Not really needed for a plane, but we do it for consistency with the other objects
+    object_metadata_by_name[ground.name] = build_object_metadata(
+        obj=ground,
+        primitive_type="plane",
+        material_name=ground_material.name,
+        extra_fields={
+            "size": 9.0,
+            "base_color": color_to_list(ground_base_color),
+            "roughness": ground_roughness,
+            "metallic": ground_metallic,
+        },
+    )
 
-    return [cube, sphere, pyramid]
+    return [cube, sphere, pyramid], object_metadata_by_name
 
 
 def set_world_background(background_image_path: Path) -> None:
@@ -752,13 +1117,24 @@ def configure_render_settings(
     scene.render.image_settings.color_mode = "RGBA"
 
 
-def render_views(cameras: Iterable[bpy.types.Object], output_dir: Path) -> None:
+def render_views(
+    cameras: Iterable[bpy.types.Object],
+    image_dir: Path,
+    metadata_dir: Path,
+    metadata_format: str,
+    object_metadata_by_name: dict[str, dict[str, Any]],
+    resolution: int,
+) -> None:
     """
     Render one PNG image for each camera.
 
     Args:
         cameras: Cameras used for rendering.
-        output_dir: Directory where images are saved.
+        image_dir: Directory where rendered images are saved.
+        metadata_dir: Directory where per-view metadata files are saved.
+        metadata_format: Export format for metadata files.
+        object_metadata_by_name: Static scene object metadata keyed by object name.
+        resolution: Square image resolution written alongside the metadata.
 
     Returns:
         None
@@ -766,13 +1142,24 @@ def render_views(cameras: Iterable[bpy.types.Object], output_dir: Path) -> None:
     scene = bpy.context.scene
 
     for view_idx, camera in enumerate(cameras):
+        view_serial = format_view_serial(view_idx)
+        image_path = image_dir / f"{view_serial}.png"
         scene.camera = camera
-        scene.render.filepath = str((output_dir / f"view_{view_idx:03d}.png").resolve())
+        scene.render.filepath = str(image_path.resolve())
         # Update scene
         bpy.context.view_layer.update()
         # write_still makes render to save the image to the filepath defined in scene.render.filepath
         bpy.ops.render.render(write_still=True)
         print(f"[OK] Rendered: {scene.render.filepath}")
+        export_view_metadata(
+            metadata_format=metadata_format,
+            metadata_dir=metadata_dir,
+            camera=camera,
+            view_idx=view_idx,
+            image_path=image_path,
+            resolution=resolution,
+            object_metadata_by_name=object_metadata_by_name,
+        )
 
 
 def save_blend_file(output_dir: Path) -> None:
@@ -800,10 +1187,11 @@ def main() -> None:
     args = parse_args()
     background_image_path = Path(args.background_image)
     output_dir = Path(args.output_dir)
+    image_dir, metadata_dir = prepare_output_directories(output_dir)
 
     validate_blender_runtime()
     clear_scene()
-    scene_objects = create_scene_objects()
+    scene_objects, object_metadata_by_name = create_scene_objects()
     set_world_background(background_image_path)
     add_lights()
     target = compute_target_point(scene_objects)
@@ -817,7 +1205,14 @@ def main() -> None:
         use_denoising=not args.no_denoise,
     )
     save_blend_file(output_dir)
-    render_views(cameras=cameras, output_dir=output_dir)
+    render_views(
+        cameras=cameras,
+        image_dir=image_dir,
+        metadata_dir=metadata_dir,
+        metadata_format=args.metadata_format,
+        object_metadata_by_name=object_metadata_by_name,
+        resolution=args.resolution,
+    )
 
 
 if __name__ == "__main__":
