@@ -1,0 +1,183 @@
+{
+  "view_serial": "view_004",
+  "image": {
+    "filename": "view_004.png",
+    "path": "/home/javit/ENSTA/2A/StageRecherche/3D-vision-Practice/dataset/MultiViewScene/img/view_004.png",
+    "resolution": [
+      512,
+      512
+    ]
+  },
+  "camera": {
+    "name": "Random_View_Camera_004",
+    "object_type": "CAMERA",
+    "location": [
+      5.676285266876221,
+      0.9552777409553528,
+      2.727907657623291
+    ],
+    "rotation_euler": [
+      1.2742904424667358,
+      -6.29653769124161e-08,
+      1.4686293601989746
+    ],
+    "scale": [
+      1.0,
+      1.0,
+      1.0
+    ],
+    "lens": 45.0,
+    "sensor_width": 32.0,
+    "clip_start": 0.10000000149011612,
+    "clip_end": 100.0,
+    "dof_enabled": true,
+    "focus_distance": 5.9138383865356445,
+    "aperture_fstop": 7.5
+  },
+  "objects": [
+    {
+      "name": "Designed_Cube_Left_X",
+      "object_type": "MESH",
+      "primitive_type": "cube",
+      "location": [
+        -2.200000047683716,
+        0.0,
+        0.8500000238418579
+      ],
+      "rotation_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "material_name": "Cube_Designed_Checker_Material",
+      "size": 1.7,
+      "roughness": 0.35,
+      "metallic": 0.0,
+      "auto_smooth": true,
+      "auto_smooth_angle": 1.0471975803375244,
+      "bevel_width": 0.05000000074505806,
+      "bevel_segments": 2,
+      "checker_scale": 8.0,
+      "checker_color1": [
+        0.05,
+        0.1,
+        0.22,
+        1.0
+      ],
+      "checker_color2": [
+        1.0,
+        0.82,
+        0.2,
+        1.0
+      ]
+    },
+    {
+      "name": "Sphere_Right_X",
+      "object_type": "MESH",
+      "primitive_type": "uv_sphere",
+      "location": [
+        2.200000047683716,
+        0.0,
+        0.949999988079071
+      ],
+      "rotation_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "material_name": "Sphere_Smooth_Red_Material",
+      "segments": 64,
+      "ring_count": 32,
+      "radius": 0.95,
+      "base_color": [
+        0.85,
+        0.15,
+        0.1,
+        1.0
+      ],
+      "roughness": 0.42,
+      "metallic": 0.0
+    },
+    {
+      "name": "Blue_Gray_Gradient_Pyramid_Positive_Y",
+      "object_type": "MESH",
+      "primitive_type": "cone_pyramid",
+      "location": [
+        0.0,
+        2.5999999046325684,
+        1.0
+      ],
+      "rotation_euler": [
+        0.0,
+        0.0,
+        0.7853981852531433
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "material_name": "Pyramid_Blue_Gray_Gradient_Material",
+      "vertices": 4,
+      "radius1": 1.0,
+      "radius2": 0.0,
+      "depth": 2.0,
+      "roughness": 0.45,
+      "metallic": 0.0,
+      "gradient_stop0_position": 0.15,
+      "gradient_stop0_color": [
+        0.18,
+        0.28,
+        0.38,
+        1.0
+      ],
+      "gradient_stop1_position": 1.0,
+      "gradient_stop1_color": [
+        0.5,
+        0.68,
+        0.86,
+        1.0
+      ]
+    },
+    {
+      "name": "Ground_Plane",
+      "object_type": "MESH",
+      "primitive_type": "plane",
+      "location": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rotation_euler": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "material_name": "Ground_Matte_Dark_Green",
+      "size": 9.0,
+      "base_color": [
+        0.12,
+        0.2,
+        0.12,
+        1.0
+      ],
+      "roughness": 0.9,
+      "metallic": 0.0
+    }
+  ]
+}
